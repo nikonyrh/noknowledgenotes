@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<!--[if lt IE 7 ]><html class="ie ie6" lang="en"> <![endif]-->
+<!--[if IE 7 ]><html class="ie ie7" lang="en"> <![endif]-->
+<!--[if IE 8 ]><html class="ie ie8" lang="en"> <![endif]-->
+<!--[if (gte IE 9)|!(IE)]><!--><html lang="en"> <!--<![endif]-->
+<head>
+    <meta charset="utf-8">
+    <title>
+        RockNotes - Own your data
+    </title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+	
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/skeleton.css">
+    <link rel="stylesheet" href="css/layout.css">
+	
+    <!--[if lt IE 9]>
+        <script src="http://html5shim.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+	
+	<!--
+    <link rel="shortcut icon" href="favicon.ico">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="72x72" href="apple-touch-icon-72x72.png">
+    <link rel="apple-touch-icon" sizes="114x114" href="apple-touch-icon-114x114.png">
+	-->
+	
+    <script type="text/javascript" src="js/jquery-2.1.1.min.js"></script>
+	<script type="text/javascript" src="js/cryptojs/rollups/sha256.js"></script>
+	<script type="text/javascript" src="js/cryptojs/rollups/aes.js"></script>
+	<style>
+	body {
+		background-color: #EEEEFF;
+	}
+	
+	.container {
+		background-color: rgba(255, 255, 255, 0.85);
+		margin-top: 10px;
+		padding-bottom: 20px;
+	}
+	
+	input[readonly="readonly"], input[readonly],
+	textarea[readonly="readonly"], textarea[readonly] {
+		background-color: #EEEEDD;
+	}
+	
+	td.key {
+		text-align: right;
+		padding-right: 8px;
+	}
+	</style>
+</head>
+<body>
+<!-- <img class="bg" src="background.jpg" alt="background"/> -->
+<div class="container">
+    <div class="sixteen columns">
+        <h1 style="margin-top: 20px; margin-bottom: 0px; text-align: center">
+            <a href="index.html" style="color: black; text-decoration: none">
+				RockNotes
+			</a>
+        </h1>
+		<h3 style="text-align: center">Own your data, share at will</h3>
+		<hr/>
+		
+		<noscript>
+		<h3 style="text-align: center; color: red">Javascript is required!</h3>
+		<hr/>
+		</noscript>
+    </div>
+	
+    <div class="one-third column">
+		<div style="text-align: center">
+			<table border=0 cellspacing=0 cellpadding=2
+					style="width: 88%; margin-left: 5%; margin-right: 7%;">
+				<tr>
+					<td>
+						<input type="password" placeholder="username (at least 4 chars)"
+							style="width: 90%" class="input" id="username"/>
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<input type="password" placeholder="password (at least 4 chars)"
+							style="width: 90%" class="input" id="password"/>
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<button id="btn_load" style="height: 40px; width: 95%">
+							...
+						</button>
+					</td>
+				</tr>
+			</table>
+			
+			<hr/>
+			
+			<table border=0 cellspacing=0 cellpadding=2
+					style="width: 88%; margin-left: 5%; margin-right: 7%;">
+				<tr>
+					<td style="padding-top: 5px">
+						<button id="btn_delete" style="height: 40px; width: 22.5%">Delete</button>
+						<button id="btn_revert" style="height: 40px; width: 22.5%">Revert</button>
+						<button id="btn_close"  style="height: 40px; width: 22.5%">Close</button>
+						<button id="btn_save"   style="height: 40px; width: 22.5%">Save</button>
+					</td>
+				</tr>
+			</table>
+			<hr/>
+			
+			<table border=0 cellspacing=0 cellpadding=2
+				style="width: 88%; margin-left: 5%; margin-right: 7%;">
+			<tr>
+				<td class="key">key<sub>enc</sub></sub></td>
+				<td>
+					<input type="text" id="key_enc"
+						style="width: 90%" placeholder="..." readonly/>
+				</td>
+			</tr>
+			
+			<tr>
+				<td class="key">id<sub>get</sub></td>
+				<td>
+					<input type="text" id="id_get"
+						style="width: 90%" placeholder="..." readonly/>
+				</td>
+			</tr>
+			
+			<tr>
+				<td class="key">id<sub>put</sub></td>
+				<td>
+					<input type="text" id="id_put"
+						style="width: 90%" placeholder="..." readonly/>
+				</td>
+			</tr>
+			
+			<tr>
+				<td class="key">key<sub>hmac</sub></td>
+				<td>
+					<input type="text" id="key_hmac"
+						style="width: 90%" placeholder="..." readonly/>
+				</td>
+			</tr>
+			</table>
+		</div>
+    </div>
+	
+    <div class="two-thirds column">
+		<textarea id="text_input" style="width: 95%" rows=15
+			placeholder="Input..."></textarea>
+		<hr style="margin-bottom: 18px; width: 96.5%"/>
+		<textarea id="text_output" style="width: 95%" rows=10
+			placeholder="Output..." readonly></textarea>
+    </div>
+</div>
+
+<script>
+	var hash = function (x) {
+		return CryptoJS.SHA256(x).toString(CryptoJS.enc.Hex);
+	};
+	
+	var salt    = "Ac9DzqfS31XRxdlV";
+	var getHash = function(mode, value1, value2) {
+		return hash(mode + hash(mode + value1 + salt) + value2);
+	};
+	
+	var jsonFormatter = {
+		stringify: function (cipherParams) {
+			return {
+				ct: cipherParams.ciphertext.toString(CryptoJS.enc.Base64),
+				iv: cipherParams.iv   ? cipherParams.iv.toString()   : null,
+				s:  cipherParams.salt ? cipherParams.salt.toString() : null
+			};
+		},
+		parse: function (jsonObj) {
+			var cipherParams = CryptoJS.lib.CipherParams.create({
+				ciphertext: CryptoJS.enc.Base64.parse(jsonObj.ct)
+			});
+			if (jsonObj.iv) {
+				cipherParams.iv = CryptoJS.enc.Hex.parse(jsonObj.iv)
+			}
+			if (jsonObj.s) {
+				cipherParams.salt = CryptoJS.enc.Hex.parse(jsonObj.s)
+			}
+			return cipherParams;
+		}
+	};
+	
+	var state = {
+		username:       '',
+		password:       '',
+		isUserValid:    false,
+		docExists:      false,
+		proof_of_work:  null,
+		revision:       ''
+	};
+	
+	var updateState = function() {
+		var username = $('#username').val();
+		var password = $('#password').val();
+		var didChange =  username != state.username ||
+		                 password != state.password;
+		
+		state.isUserValid = username.length >=4 && password.length >= 4;
+		
+		if (state.isUserValid && didChange) {
+			$('#key_enc' ).val(getHash('key_enc',  username, password));
+			$('#id_put'  ).val(getHash('id_put',   username, password));
+			$('#key_hmac').val(getHash('key_hmac', username, password));
+			
+			$('#id_get').val(getHash('id_get', 'id_get', $('#key_enc').val()));
+		}
+		else if (
+			!state.isUserValid &&
+			$('#key_enc' ).val().length > 0
+		) {
+			$('#key_enc' ).val('');
+			$('#id_put'  ).val('');
+			$('#key_hmac').val('');
+			$('#id_get'  ).val('');
+			
+			didChange = true;
+		}
+		
+		if (didChange) {
+			$('#text_input' ).val('');
+			$('#text_output').val('');
+			
+			state.proof_of_work = null;
+			state.revision      = '';
+		}
+		
+		state.docExists = !!(
+			state.proof_of_work &&
+			'response' in state.proof_of_work
+		);
+		
+		state.username = username;
+		state.password = password;
+		
+		$('#btn_load').prop('disabled', !state.isUserValid);
+		
+		if (!state.isUserValid) {
+			$('#btn_load').text('Insert username & password');
+		}
+		else if (!state.proof_of_work) {
+			$('#btn_load').text('Load document');
+		}
+		else if (state.docExists) {
+			$('#btn_load').text('Ready for editing!');
+			$('#btn_load').prop('disabled', true);
+		}
+		else {
+			$('#btn_load').text('Create a new document?');
+		}
+		
+		var textInputReadonly = !state.docExists;
+		var diffFromRevision  = state.revision != $('#text_input').val();
+		
+		if ($('#text_input').prop('readonly') != textInputReadonly) {
+			$('#text_input').prop('readonly', textInputReadonly);
+			$('#text_output').val('');
+		}
+		
+		$('#btn_revert').prop('disabled', !state.docExists || !diffFromRevision);
+		$('#btn_close' ).prop('disabled', !state.docExists);
+		
+		var emptyDoc = $('#text_input').val().length == 0;
+		$('#btn_delete').prop('disabled', !emptyDoc || !state.docExists);
+		$('.input'     ).prop('readonly', !emptyDoc);
+		
+		$('#btn_save'  ).prop('disabled', !state.docExists)
+	};
+	
+	var countLeadingZeros = function(str) {
+		match = str.match('^0+');
+		return match ? match[0].length : 0;
+	};
+	
+	var loadContents = function(contents) {
+		var hmac = getHash('hmac', $('#key_hmac').val(),
+			JSON.stringify(contents.data));
+		
+		if (hmac != contents.hmac) {
+			console.error({
+				'error':    'HMACs do not match!',
+				'expected': hmac,
+				'found':    contents.hmac
+			});
+			return true;
+		}
+		
+		state.revision = CryptoJS.AES.decrypt(
+			jsonFormatter.parse(contents.data),
+			$('#key_enc').val()
+		).toString(CryptoJS.enc.Utf8);
+		$('#text_input').val(state.revision);
+		
+		return false;
+	};
+	
+	var inputClick = function() {
+		if (!state.isUserValid) {
+			return;
+		}
+		
+		var resourceUrl = '/api/' + $('#id_get').val();
+		
+		if (!state.proof_of_work) {
+			$.get(resourceUrl, function (data) {
+				if ('proof_of_work' in data) {
+					state.proof_of_work = data.proof_of_work;
+					if ('contents' in data) {
+						if (loadContents(data.contents)) {
+							// Error with HMAC!
+							
+							if ('response' in state.proof_of_work) {
+								delete state.proof_of_work.response;
+							}
+						}
+					}
+					updateState();
+				}
+				else {
+					console.error({error: 'Unexpected response!', data: data});
+				}
+			});
+			return;
+		}
+		
+		if (state.proof_of_work.hash != 'SHA-256') {
+			console.error({error: 'Unknown hash!', hash: state.proof_of_work.hash});
+			return;
+		}
+		
+		var H = null;
+		if (state.proof_of_work.formula == 'H(H(%x || %salt) || %x)') {
+			H = function (x) { return hash(hash(x + state.proof_of_work.salt) + x); };
+		}
+		else {
+			//TODO: Implement more alternative HMAC constructs
+			console.error({error: 'Unknown formula!', formula: state.proof_of_work.formula});
+			return;
+		}
+		
+		if (state.proof_of_work.leading_zeros % 16 != 0) {
+			//TODO: Implement leading zeros code for any integer parameters
+			console.error({
+				error: 'Expected leading_zeros to be a multiple of 16!',
+				leading_zeros: state.proof_of_work.leading_zeros
+			});
+			return;
+		}
+		
+		// Brute-force the challenge
+		var leadingZeros = Math.round(state.proof_of_work.leading_zeros / 16);
+		var response     = 0;
+		var startTime    = new Date();
+		while (countLeadingZeros(H(response)) < leadingZeros) {
+			++response;
+		}
+		response = response.toString();
+		
+		//console.log({'response': response, 'H': H(response), 'time_ms': new Date() - startTime});
+		
+		$.ajax({
+			type: 'PUT',
+			url: resourceUrl,
+			contentType: 'application/json',
+			data: JSON.stringify({
+				'proof_of_work': {'response': response},
+				'put_id': $('#id_put').val()
+			}),
+			success: function (data) {
+				if (!data.success) {
+					console.error({
+						error: 'Error when creating the document!',
+						data: data
+					});
+					return;
+				}
+				
+				state.proof_of_work.response = response;
+				updateState();
+			}
+		});
+	};
+	
+	var closeClick = function() {
+		$('.input').val('');
+		updateState();
+	};
+	
+	var saveClick = function() {
+		var data = jsonFormatter.stringify(
+			CryptoJS.AES.encrypt(
+				$('#text_input').val(),
+				$('#key_enc').val()
+			)
+		);
+		
+		var contents = {
+			'data': data,
+			'hmac': getHash('hmac', $('#key_hmac').val(),
+				JSON.stringify(data))
+		};
+		
+		$.ajax({
+			type: 'PUT',
+			url: '/api/' + $('#id_get').val(),
+			contentType: 'application/json',
+			data: JSON.stringify({
+				'proof_of_work': state.proof_of_work,
+				'contents':      contents,
+				'put_id':        $('#id_put').val()
+			}),
+			success: function (data) {
+				$('#text_output').val(JSON.stringify(contents));
+				state.revision = $('#text_input').val();
+				updateState();
+			}
+		});
+	};
+	
+	$(function() {
+		$('#text_input').on('input', function() {
+			updateState();
+		});
+		
+		$('#btn_save'  ).on('click', saveClick);
+		$('.input'     ).on('input', updateState);
+		$('#btn_load'  ).on('click', inputClick);
+		$('#btn_close' ).on('click', closeClick);
+		$('#btn_delete').on('click', function() {
+			$.ajax({
+				type: 'DELETE',
+				url: '/api/' + $('#id_get').val(),
+				contentType: 'application/json',
+				data: JSON.stringify({
+					'put_id': $('#id_put').val()
+				}),
+				success: function (data) {
+					
+				}
+			});
+			
+			closeClick();
+		});
+		
+		$('#btn_revert').on('click', function () {
+			$('#text_input').val(state.revision ? state.revision : '');
+			$('#text_output').val('');
+			updateState();
+		});
+		
+		$('.input').val('test');
+		updateState();
+	});
+</script>
+
+<!-- <img src="https://counter.nikonyrh.org/rocknotes/index.html.gif" alt="counter"/> -->
+</body>
+</html>
+</html>

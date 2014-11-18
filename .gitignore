@@ -1,0 +1,9 @@
+*
+!*/
+!.gitignore
+!*.conf
+!*.html
+!*.htm
+!*.php
+!*.css
+!*.js
