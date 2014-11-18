@@ -6,7 +6,7 @@
 <head>
     <meta charset="utf-8">
     <title>
-        RockNotes - Own your data
+        NoKnowledgeNotes - Own your data, share at will
     </title>
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 	
@@ -18,16 +18,16 @@
         <script src="http://html5shim.googlecode.com/svn/trunk/html5.js"></script>
     <![endif]-->
 	
-	<!--
     <link rel="shortcut icon" href="favicon.ico">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <link rel="apple-touch-icon" sizes="72x72" href="apple-touch-icon-72x72.png">
     <link rel="apple-touch-icon" sizes="114x114" href="apple-touch-icon-114x114.png">
-	-->
 	
     <script type="text/javascript" src="js/jquery-2.1.1.min.js"></script>
 	<script type="text/javascript" src="js/cryptojs/rollups/sha256.js"></script>
 	<script type="text/javascript" src="js/cryptojs/rollups/aes.js"></script>
+	
+	<script type="text/javascript" src="js/lzstring/lz-string-1.3.3-min.js"></script>
 	<style>
 	body {
 		background-color: #EEEEFF;
@@ -56,10 +56,13 @@
     <div class="sixteen columns">
         <h1 style="margin-top: 20px; margin-bottom: 0px; text-align: center">
             <a href="index.html" style="color: black; text-decoration: none">
-				RockNotes
+				NoKnowledgeNotes
 			</a>
         </h1>
-		<h3 style="text-align: center">Own your data, share at will</h3>
+		<h3 style="text-align: center">
+			Own your data, share at will<sup style="font-size: 50%">[alpha]</sup>
+		</h3>
+		
 		<hr/>
 		
 		<noscript>
@@ -86,7 +89,7 @@
 				</tr>
 				<tr>
 					<td>
-						<button id="btn_load" style="height: 40px; width: 95%">
+						<button id="btn_load" style="height: 40px; width: 93.5%">
 							...
 						</button>
 					</td>
@@ -155,6 +158,7 @@
 </div>
 
 <script>
+	// Set up needed objects
 	var hash = function (x) {
 		return CryptoJS.SHA256(x).toString(CryptoJS.enc.Hex);
 	};
@@ -196,6 +200,8 @@
 	};
 	
 	var updateState = function() {
+		// This called upon various events to update input elements' states
+		
 		var username = $('#username').val();
 		var password = $('#password').val();
 		var didChange =  username != state.username ||
@@ -264,12 +270,11 @@
 		
 		$('#btn_revert').prop('disabled', !state.docExists || !diffFromRevision);
 		$('#btn_close' ).prop('disabled', !state.docExists);
+		$('#btn_save'  ).prop('disabled', !state.docExists)
 		
 		var emptyDoc = $('#text_input').val().length == 0;
 		$('#btn_delete').prop('disabled', !emptyDoc || !state.docExists);
 		$('.input'     ).prop('readonly', !emptyDoc);
-		
-		$('#btn_save'  ).prop('disabled', !state.docExists)
 	};
 	
 	var countLeadingZeros = function(str) {
@@ -278,6 +283,8 @@
 	};
 	
 	var loadContents = function(contents) {
+		// Used to load, validate, decrypt and decompress stored documents
+		
 		var hmac = getHash('hmac', $('#key_hmac').val(),
 			JSON.stringify(contents.data));
 		
@@ -290,12 +297,25 @@
 			return true;
 		}
 		
-		state.revision = CryptoJS.AES.decrypt(
-			jsonFormatter.parse(contents.data),
-			$('#key_enc').val()
-		).toString(CryptoJS.enc.Utf8);
-		$('#text_input').val(state.revision);
+		var result = jQuery.parseJSON(
+			CryptoJS.AES.decrypt(
+				jsonFormatter.parse(contents.data),
+				$('#key_enc').val()
+			).toString(CryptoJS.enc.Utf8)
+		);
 		
+		if (result.content_type == 'LZString.compressToUTF16') {
+			state.revision = LZString.decompressFromUTF16(result.payload);
+		}
+		else {
+			console.error({
+				'error': 'Unknown result.content_type',
+				'content_type': result.content_type
+			});
+			return true;
+		}
+		
+		$('#text_input').val(state.revision);
 		return false;
 	};
 	
@@ -307,18 +327,27 @@
 		var resourceUrl = '/api/' + $('#id_get').val();
 		
 		if (!state.proof_of_work) {
+			// We don't have the proof_of_work in our state,
+			// which means we are loading or creating a document
+			
 			$.get(resourceUrl, function (data) {
 				if ('proof_of_work' in data) {
+					// Aha, we've got proof_of_work in the response,
+					// indicating that the document exists already!
+					
 					state.proof_of_work = data.proof_of_work;
+					
 					if ('contents' in data) {
+						// We've got previously stored contents, let's load them
+						
 						if (loadContents(data.contents)) {
-							// Error with HMAC!
-							
+							// Error with HMAC or an other problem!
 							if ('response' in state.proof_of_work) {
 								delete state.proof_of_work.response;
 							}
 						}
 					}
+					
 					updateState();
 				}
 				else {
@@ -328,6 +357,8 @@
 			return;
 		}
 		
+		// proof_of_work is in our state, this click means we want to commit
+		// into solving the challenge and thus creating the new document
 		if (state.proof_of_work.hash != 'SHA-256') {
 			console.error({error: 'Unknown hash!', hash: state.proof_of_work.hash});
 			return;
@@ -360,9 +391,18 @@
 			++response;
 		}
 		response = response.toString();
+		var time_ms = new Date() - startTime;
 		
-		//console.log({'response': response, 'H': H(response), 'time_ms': new Date() - startTime});
+		if (time_ms > 100) {
+			console.log({
+				'response': response,
+				'H':        H(response),
+				'count':    countLeadingZeros(H(response)),
+				'time_ms':  time_ms
+			});
+		}
 		
+		// Create the document
 		$.ajax({
 			type: 'PUT',
 			url: resourceUrl,
@@ -392,9 +432,17 @@
 	};
 	
 	var saveClick = function() {
+		var inputRaw  = $('#text_input').val();
+		var inputComp = LZString.compressToUTF16(inputRaw);
+		
+		//console.log({saved: 100*(1.0 - inputComp.length / inputRaw.length)});
+		
 		var data = jsonFormatter.stringify(
 			CryptoJS.AES.encrypt(
-				$('#text_input').val(),
+				JSON.stringify({
+					content_type: 'LZString.compressToUTF16',
+					payload:      inputComp
+				}),
 				$('#key_enc').val()
 			)
 		);
@@ -423,6 +471,8 @@
 	};
 	
 	$(function() {
+		// Set up event listeners once the document is ready
+		
 		$('#text_input').on('input', function() {
 			updateState();
 		});
@@ -453,12 +503,11 @@
 			updateState();
 		});
 		
-		$('.input').val('test');
 		updateState();
 	});
 </script>
 
-<!-- <img src="https://counter.nikonyrh.org/rocknotes/index.html.gif" alt="counter"/> -->
+<img src="https://counter.nikonyrh.org/noknowledgenotes/index.html.gif" alt="counter"/>
 </body>
 </html>
 </html>

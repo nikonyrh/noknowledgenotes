@@ -1,5 +1,4 @@
 <?php
-
 $json = function($result) {
 	header('Content-Type: application/json');
 	die(json_encode($result));
@@ -15,19 +14,13 @@ $getHash = function ($a, $b, $mode) use ($hash, $hashSalt) {
 	return $hash($mode . $hash($mode . $a . $hashSalt) . $b);
 };
 
-if($_SERVER['REQUEST_METHOD'] == 'PUT') {
-	$_PUT = json_decode(file_get_contents('php://input'), true);
-}
-else {
-	$_PUT = array();
-}
+$_PUT = ($_SERVER['REQUEST_METHOD'] == 'PUT') ?
+	json_decode(file_get_contents('php://input'), true) :
+	array();
 
-if($_SERVER['REQUEST_METHOD'] == 'DELETE') {
-	$_DELETE = json_decode(file_get_contents('php://input'), true);
-}
-else {
-	$_DELETE = array();
-}
+$_DELETE = ($_SERVER['REQUEST_METHOD'] == 'DELETE') ?
+	json_decode(file_get_contents('php://input'), true) :
+	array();
 
 if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
 	$get_id  = $route[1];
@@ -36,7 +29,7 @@ if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
 	$file   = $folder . '/' . substr($file, 0, -3) . '.json';
 	
 	$salt         = $getHash('POW', $get_id, $powSalt);
-	$leadingZeros = 16 * 2;
+	$leadingZeros = 16 * 4;
 	
 	$proofOfWork = array(
 		'hash'          => 'SHA-256',
@@ -46,6 +39,7 @@ if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
 	);
 	
 	$exists = is_dir($folder) && file_exists($file);
+	
 	if ($exists) {
 		if ($_SERVER['REQUEST_METHOD'] == 'GET') {
 			$contents = json_decode(file_get_contents($file), true);
@@ -61,6 +55,7 @@ if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
 			
 			$json($response);
 		}
+		
 		if ($_SERVER['REQUEST_METHOD'] == 'DELETE') {
 			if (!isset($_DELETE['put_id'])) {
 				$json(array(
@@ -69,21 +64,20 @@ if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
 			}
 			
 			$contents = json_decode(file_get_contents($file), true);
-			if (!isset($contents['put_id'])) {
-				unlink($file);
-			}
 			
-			if ($contents['put_id'] != $_DELETE['put_id']) {
+			if (
+				isset($contents['put_id']) &&
+				$contents['put_id'] != $_DELETE['put_id']
+			) {
 				$json(array(
 					'get_id' => $get_id,
 					'error'  => 'put_ids do not match!'
 				));
 			}
-			else {
-				unlink($file);
-				if (!(new \FilesystemIterator($folder))->valid()) {
-					rmdir($folder);
-				}
+			
+			unlink($file);
+			if (!(new \FilesystemIterator($folder))->valid()) {
+				rmdir($folder);
 			}
 			
 			$json(array(

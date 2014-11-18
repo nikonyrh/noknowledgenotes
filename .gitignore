@@ -6,4 +6,6 @@
 !*.htm
 !*.php
 !*.css
+!*.png
+!*.ico
 !*.js
