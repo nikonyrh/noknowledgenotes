@@ -28,6 +28,8 @@ if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
 	$folder = str_replace("\\", '/', __DIR__) . '/data/' . substr($file, -3);
 	$file   = $folder . '/' . substr($file, 0, -3) . '.json';
 	
+	//TODO: Make sure $folder is writeable!!!
+	
 	// Expected amount of work is:
 	//     Client: $nSolutions * pow(16, $leadingZeros)
 	//     Server: $nSolutions
