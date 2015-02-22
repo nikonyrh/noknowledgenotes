@@ -23,11 +23,12 @@
     <link rel="apple-touch-icon" sizes="72x72" href="apple-touch-icon-72x72.png">
     <link rel="apple-touch-icon" sizes="114x114" href="apple-touch-icon-114x114.png">
 	
-    <script type="text/javascript" src="js/jquery-2.1.1.min.js"></script>
+    <script type="text/javascript" src="js/jquery/jquery-2.1.1.min.js"></script>
 	<script type="text/javascript" src="js/cryptojs/rollups/sha256.js"></script>
 	<script type="text/javascript" src="js/cryptojs/rollups/aes.js"></script>
 	
 	<script type="text/javascript" src="js/lzstring/lz-string-1.3.3-min.js"></script>
+	<!-- <script type="text/javascript" src="js/bloomfilter/bloomfilter.js"></script> -->
 	<style>
 	body {
 		background-color: #EEEEFF;
@@ -158,6 +159,10 @@
 </div>
 
 <script>
+	if (!Date.now) {
+		Date.now = function now() { return new Date().getTime(); };
+	}
+	
 	// Set up needed objects
 	var hash = function (x) {
 		return CryptoJS.SHA256(x).toString(CryptoJS.enc.Hex);
@@ -194,9 +199,7 @@
 		username:       '',
 		password:       '',
 		isUserValid:    false,
-		docExists:      false,
-		proof_of_work:  null,
-		revision:       ''
+		docExists:      false
 	};
 	
 	var updateState = function() {
@@ -234,6 +237,12 @@
 			
 			state.proof_of_work = null;
 			state.revision      = '';
+			state.hmac          = '';
+			state.hmacs         = {};
+			
+			if ('hmacs' in state) {
+				delete state.hmacs;
+			}
 		}
 		
 		state.docExists = !!(
@@ -304,6 +313,8 @@
 			).toString(CryptoJS.enc.Utf8)
 		);
 		
+		state.hmacs = 'hmacs' in result ? result.hmacs : {};
+		
 		if (result.content_type == 'LZString.compressToUTF16') {
 			state.revision = LZString.decompressFromUTF16(result.payload);
 		}
@@ -316,7 +327,70 @@
 		}
 		
 		$('#text_input').val(state.revision);
+		state.hmac = hmac;
+		
 		return false;
+	};
+	
+	var isCreating     = false;
+	var createDocument = function(H, resourceUrl,
+			response, proof_of_work, i) {
+		var nSolutions = proof_of_work.n_solutions;
+		
+		if (response.length < nSolutions) {
+			if (!i) {
+				isCreating = true;
+				i = 0;
+			}
+			
+			var validator = new RegExp(
+				'^' + (new Array(proof_of_work.leading_zeros+1)).join('0')
+			);
+			
+			for (var iStart = i; i < iStart + 1000 &&
+					response.length < nSolutions; ++i) {
+				var iString = i.toString();
+				var h = H(iString);
+				
+				if (validator.test(h)) {
+					response.push(iString);
+				}
+			}
+			
+			var percent = 100 * response.length / nSolutions;
+			$('#btn_load').text('Generating... (' + percent.toFixed(1) + '%)');
+			
+			// An asynchronous recursive call, to enable load button's text
+			// to change in the UI. Maybe there is a better way?
+			setTimeout(function() {
+				createDocument(H, resourceUrl, response, proof_of_work, i);
+			}, 1);
+		}
+		else {
+			isCreating = false;
+			$.ajax({
+				type: 'PUT',
+				url: resourceUrl,
+				contentType: 'application/json',
+				data: JSON.stringify({
+					'proof_of_work': {'response': response},
+					'put_id': $('#id_put').val()
+				}),
+				success: function (data) {
+					if (!data.success) {
+						console.error({
+							error: 'Error when creating the document!',
+							data: data
+						});
+						return;
+					}
+					
+					state.proof_of_work.response = response;
+					state.hmacs                  = {};
+					updateState();
+				}
+			});
+		}
 	};
 	
 	var inputClick = function() {
@@ -374,56 +448,11 @@
 			return;
 		}
 		
-		if (state.proof_of_work.leading_zeros % 16 != 0) {
-			//TODO: Implement leading zeros code for any integer parameters
-			console.error({
-				error: 'Expected leading_zeros to be a multiple of 16!',
-				leading_zeros: state.proof_of_work.leading_zeros
-			});
-			return;
+		// createDocument is asynchronous, so we must avoid
+		// not to double-start it upon multiple clicks. 
+		if (!isCreating) {
+			createDocument(H, resourceUrl, [], state.proof_of_work);
 		}
-		
-		// Brute-force the challenge
-		var leadingZeros = Math.round(state.proof_of_work.leading_zeros / 16);
-		var response     = 0;
-		var startTime    = new Date();
-		while (countLeadingZeros(H(response)) < leadingZeros) {
-			++response;
-		}
-		response = response.toString();
-		var time_ms = new Date() - startTime;
-		
-		if (time_ms > 100) {
-			console.log({
-				'response': response,
-				'H':        H(response),
-				'count':    countLeadingZeros(H(response)),
-				'time_ms':  time_ms
-			});
-		}
-		
-		// Create the document
-		$.ajax({
-			type: 'PUT',
-			url: resourceUrl,
-			contentType: 'application/json',
-			data: JSON.stringify({
-				'proof_of_work': {'response': response},
-				'put_id': $('#id_put').val()
-			}),
-			success: function (data) {
-				if (!data.success) {
-					console.error({
-						error: 'Error when creating the document!',
-						data: data
-					});
-					return;
-				}
-				
-				state.proof_of_work.response = response;
-				updateState();
-			}
-		});
 	};
 	
 	var closeClick = function() {
@@ -434,14 +463,21 @@
 	var saveClick = function() {
 		var inputRaw  = $('#text_input').val();
 		var inputComp = LZString.compressToUTF16(inputRaw);
-		
 		//console.log({saved: 100*(1.0 - inputComp.length / inputRaw.length)});
+		
+		if ('hmac' in state) {
+			state.hmacs[state.hmac.substr(0, 32)] = [
+				Math.round(Date.now() / 1000.0),
+				Object.keys(state.hmacs).length + 1
+			];
+		}
 		
 		var data = jsonFormatter.stringify(
 			CryptoJS.AES.encrypt(
 				JSON.stringify({
 					content_type: 'LZString.compressToUTF16',
-					payload:      inputComp
+					payload:      inputComp,
+					hmacs:        state.hmacs
 				}),
 				$('#key_enc').val()
 			)
@@ -449,9 +485,10 @@
 		
 		var contents = {
 			'data': data,
-			'hmac': getHash('hmac', $('#key_hmac').val(),
-				JSON.stringify(data))
+			'hmac': getHash('hmac', $('#key_hmac').val(), JSON.stringify(data))
 		};
+		
+		state.hmac = contents.hmac;
 		
 		$.ajax({
 			type: 'PUT',
@@ -507,7 +544,7 @@
 	});
 </script>
 
-<img src="https://counter.nikonyrh.org/noknowledgenotes/index.html.gif" alt="counter"/>
+<img src="https://counter.nikonyrh.org/noknowledgenotes/index.html.gif" alt=""/>
 </body>
 </html>
 </html>

@@ -28,14 +28,20 @@ if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
 	$folder = str_replace("\\", '/', __DIR__) . '/data/' . substr($file, -3);
 	$file   = $folder . '/' . substr($file, 0, -3) . '.json';
 	
-	$salt         = $getHash('POW', $get_id, $powSalt);
-	$leadingZeros = 16 * 4;
+	$salt = $getHash('POW', $get_id, $powSalt);
+	
+	// Expected amount of work is:
+	//     Client: $nSolutions * pow(16, $leadingZeros)
+	//     Server: $nSolutions
+	$leadingZeros = 2;
+	$nSolutions   = 200;
 	
 	$proofOfWork = array(
 		'hash'          => 'SHA-256',
 		'formula'       => 'H(H(%x || %salt) || %x)',
 		'salt'          => $salt,
-		'leading_zeros' => $leadingZeros
+		'leading_zeros' => $leadingZeros,
+		'n_solutions'   => $nSolutions
 	);
 	
 	$exists = is_dir($folder) && file_exists($file);
@@ -100,29 +106,29 @@ if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
 	
 	// Validate the response
 	$response = $_PUT['proof_of_work']['response'];
-	$result    = $hash($hash($response . $salt) . $response);
-	$len       = preg_match('/^0+/', $result, $l) ? strlen($l[0])*16 : 0;
-	$success   = $len >= $leadingZeros;
-	
-	$result = array(
-		'result'        => $result,
-		'leading_zeros' => array(
-			'expected' => $leadingZeros,
-			'result'   => $len
-		),
-		'success' => $success
-	);
-	
-	if (!$success) {
-		$result['error'] = 'Insufficient number of leading zeros in result!';
-		$json($result);
-	}
+	$result   = array('success' => false);
 	
 	if (!isset($_PUT['put_id'])) {
 		$result['error']   = 'put_id missing!';
-		$result['success'] = false;
 		$json($result);
 	}
+	
+	if (sizeof($response) != $nSolutions) {
+		$result['error'] = sprintf(
+			'Wrong number of POW elements: %d instead of %d',
+			sizeof($response), $nSolutions);
+		$json($result);
+	}
+	
+	foreach ($response as $r) {
+		$h = $hash($hash($r . $salt) . $r);
+		if (strlen($h) - strlen(ltrim($h, '0')) < $leadingZeros) {
+			$result['error'] = sprintf("Invalid hash from '%s': %s!", $r, $h);
+			$json($result);
+		}
+	}
+	
+	$result['success'] = true;
 	
 	if (!is_dir($folder)) {
 		mkdir($folder);
