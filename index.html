@@ -52,7 +52,6 @@
 	</style>
 </head>
 <body>
-<!-- <img class="bg" src="background.jpg" alt="background"/> -->
 <div class="container">
     <div class="sixteen columns">
         <h1 style="margin-top: 20px; margin-bottom: 0px; text-align: center">
@@ -281,8 +280,9 @@
 		$('#btn_close' ).prop('disabled', !state.docExists);
 		$('#btn_save'  ).prop('disabled', !state.docExists)
 		
+		
 		var emptyDoc = $('#text_input').val().length == 0;
-		$('#btn_delete').prop('disabled', !emptyDoc || !state.docExists);
+		$('#btn_delete').prop('disabled', !state.docExists);
 		$('.input'     ).prop('readonly', !emptyDoc);
 	};
 	
@@ -519,6 +519,12 @@
 		$('#btn_load'  ).on('click', inputClick);
 		$('#btn_close' ).on('click', closeClick);
 		$('#btn_delete').on('click', function() {
+			var emptyDoc = $('#text_input').val().length == 0;
+			if (!emptyDoc) {
+				alert('Please erase all text in the textbox before clicking "Delete"');
+				return false;
+			}
+			
 			$.ajax({
 				type: 'DELETE',
 				url: '/api/' + $('#id_get').val(),

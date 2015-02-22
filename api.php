@@ -6,11 +6,11 @@ $json = function($result) {
 
 $hash = function ($str) { return hash('sha256', $str, false); };
 
-$hashSalt = 'Ac9DzqfS31XRxdlV';
+$hashSalt = 'AodoKSThWzxjjODE';
 $fileSalt = 'hLl3bc6id86TZ7YZ';
 $powSalt  = '5Yuxp01PSprE0DF8';
 
-$getHash = function ($a, $b, $mode) use ($hash, $hashSalt) {
+$getHash = function ($mode, $a, $b) use ($hash, $hashSalt) {
 	return $hash($mode . $hash($mode . $a . $hashSalt) . $b);
 };
 
@@ -24,11 +24,9 @@ $_DELETE = ($_SERVER['REQUEST_METHOD'] == 'DELETE') ?
 
 if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
 	$get_id  = $route[1];
-	$file   = substr($hash($fileSalt . $hash($get_id . $fileSalt)), 32);
+	$file   = substr($getHash('filename', $get_id, $fileSalt), 32);
 	$folder = str_replace("\\", '/', __DIR__) . '/data/' . substr($file, -3);
 	$file   = $folder . '/' . substr($file, 0, -3) . '.json';
-	
-	$salt = $getHash('POW', $get_id, $powSalt);
 	
 	// Expected amount of work is:
 	//     Client: $nSolutions * pow(16, $leadingZeros)
@@ -36,10 +34,11 @@ if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
 	$leadingZeros = 2;
 	$nSolutions   = 200;
 	
+	$powSalt     = $getHash('POW', $get_id, $powSalt);
 	$proofOfWork = array(
 		'hash'          => 'SHA-256',
 		'formula'       => 'H(H(%x || %salt) || %x)',
-		'salt'          => $salt,
+		'salt'          => $powSalt,
 		'leading_zeros' => $leadingZeros,
 		'n_solutions'   => $nSolutions
 	);
@@ -104,27 +103,48 @@ if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
 		));
 	}
 	
-	// Validate the response
-	$response = $_PUT['proof_of_work']['response'];
-	$result   = array('success' => false);
-	
 	if (!isset($_PUT['put_id'])) {
-		$result['error']   = 'put_id missing!';
-		$json($result);
+		$json(array(
+			'success' => false,
+			'error'   => 'put_id missing!'
+		));
 	}
 	
+	if ($exists) {
+		$contents = json_decode(file_get_contents($file), true);
+		
+		if (
+			isset($contents['put_id']) &&
+			$contents['put_id'] != $_PUT['put_id']
+		) {
+			$json(array(
+				'get_id' => $get_id,
+				'error'  => 'put_ids do not match!'
+			));
+		}
+	}
+	
+	// Validate the proof-of-work.
+	//TODO: this should be cached to APC or something...
+	$response = $_PUT['proof_of_work']['response'];
 	if (sizeof($response) != $nSolutions) {
-		$result['error'] = sprintf(
-			'Wrong number of POW elements: %d instead of %d',
-			sizeof($response), $nSolutions);
-		$json($result);
+		$json(array(
+			'success' => false,
+			'error'   => sprintf(
+				'Wrong number of POW elements: %d instead of %d',
+				sizeof($response), $nSolutions
+			)
+		));
 	}
 	
 	foreach ($response as $r) {
-		$h = $hash($hash($r . $salt) . $r);
+		$h = $hash($hash($r . $powSalt) . $r);
 		if (strlen($h) - strlen(ltrim($h, '0')) < $leadingZeros) {
-			$result['error'] = sprintf("Invalid hash from '%s': %s!", $r, $h);
 			$json($result);
+			$json(array(
+				'success' => false,
+				'error'   => sprintf("Invalid hash from '%s': %s!", $r, $h)
+			));
 		}
 	}
 	
