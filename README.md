@@ -39,27 +39,30 @@ multi-document storage within the single JSON document.
 Client-side steps
 --------
 Creating a new document:
-1. User types in username and password, encryption keys are derived automatically
-2. User clicks "Load document"
-3. Server responds that the document does not exist, submit a proof-of-work proposal
-4. User is asked whether he wants to create a new document
-5. JavaScript is used to brute-force the SHA256-based POW, upon completion the answer is submitted to the server (takes 2 - 3 seconds)
-6. User can type the note and click "Save" upon completion
+
+ 1. User types in username and password, encryption keys are derived automatically
+ 2. User clicks "Load document"
+ 3. Server responds that the document does not exist, submit a proof-of-work proposal
+ 4. User is asked whether he wants to create a new document
+ 5. JavaScript is used to brute-force the SHA256-based POW, upon completion the answer is submitted to the server (takes 2 - 3 seconds)
+ 6. User can type the note and click "Save" upon completion
 
 Detailed steps on storing a new version of the document:
-1. Compress the plaintext with nto a UTF16 string (uses [lz-string](https://github.com/pieroxy/lz-string/))
-2. Create the JavaScript object, containing compressed contents and metadata (including a list of previous HMAC values and dates)
-3. Stringify the object as JSON
-4. Encrypt it with 256-bit AES (uses [CryptoJS](https://code.google.com/p/crypto-js/))
-5. Calculate the new HMAC value and embed that along with the document
-6. Upload new contents to the server (AJAX PUT call)
-7. Server checks that the put ID matches with the previously stored value, refuses the operation if ids do not match
+
+ 1. Compress the plaintext with nto a UTF16 string (uses [lz-string](https://github.com/pieroxy/lz-string/))
+ 2. Create the JavaScript object, containing compressed contents and metadata (including a list of previous HMAC values and dates)
+ 3. Stringify the object as JSON
+ 4. Encrypt it with 256-bit AES (uses [CryptoJS](https://code.google.com/p/crypto-js/))
+ 5. Calculate the new HMAC value and embed that along with the document
+ 6. Upload new contents to the server (AJAX PUT call)
+ 7. Server checks that the put ID matches with the previously stored value, refuses the operation if ids do not match
 
 Deleting a document:
-1. User types the username and password and clicks "Load document", if not loaded already
-2. User empties the input text field
-3. User clicks the "Delete" button
-4. Server checks that the put ID matches with the previously stored value, refuses the operation if ids do not match
+
+ 1. User types the username and password and clicks "Load document", if not loaded already
+ 2. User empties the input text field
+ 3. User clicks the "Delete" button
+ 4. Server checks that the put ID matches with the previously stored value, refuses the operation if ids do not match
 
 Used keys and proposed key derivation
 --------
