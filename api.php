@@ -1,134 +1,114 @@
 <?php
+/*************************
+	General settings
+*************************/
+
+// If these are changed then all stored documents become inaccessible!
+$hashSalt      = 'AodoKSThWzxjjODE';
+$fileSalt      = 'hLl3bc6id86TZ7YZ';
+$serverPowSalt = '5Yuxp01PSprE0DF8';
+
+// Expected amount of work is:
+//     Client: $nSolutions * pow(16, $leadingZeros)
+//     Server: $nSolutions
+$leadingZeros = 2;
+$nSolutions   = 200;
+
+$documentUri = '/api/documents';
+
+/*************************
+	Helper variables (plus a function)
+*************************/
+$isHttpMethod = function ($method) use ($_SERVER) {
+	return $_SERVER['REQUEST_METHOD'] == $method;
+};
+
+$_PUT = $isHttpMethod('PUT') ?
+	json_decode(file_get_contents('php://input'), true) :
+	array();
+
+$_DELETE = $isHttpMethod('DELETE') ?
+	json_decode(file_get_contents('php://input'), true) :
+	array();
+
+
+/*************************
+	Helper functions, maybe these could be grouped into classes
+*************************/
 $json = function($result) {
 	header('Content-Type: application/json');
 	die(json_encode($result));
 };
 
-$hash = function ($str) { return hash('sha256', $str, false); };
+$hash = function ($str) {
+	return hash('sha256', $str, false);
+};
 
-$hashSalt = 'AodoKSThWzxjjODE';
-$fileSalt = 'hLl3bc6id86TZ7YZ';
-$powSalt  = '5Yuxp01PSprE0DF8';
 
 $getHash = function ($mode, $a, $b) use ($hash, $hashSalt) {
 	return $hash($mode . $hash($mode . $a . $hashSalt) . $b);
 };
 
-$_PUT = ($_SERVER['REQUEST_METHOD'] == 'PUT') ?
-	json_decode(file_get_contents('php://input'), true) :
-	array();
-
-$_DELETE = ($_SERVER['REQUEST_METHOD'] == 'DELETE') ?
-	json_decode(file_get_contents('php://input'), true) :
-	array();
-
-if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
-	$get_id  = $route[1];
-	$file   = substr($getHash('filename', $get_id, $fileSalt), 32);
-	$folder = str_replace("\\", '/', __DIR__) . '/data/' . substr($file, -3);
-	$file   = $folder . '/' . substr($file, 0, -3) . '.json';
+$getFile = function ($getId, $file) use ($documentUri) {
+	$document = json_decode(file_get_contents($file), true);
 	
-	//TODO: Make sure $folder is writeable!!!
+	// A migration step, will be removed in future
+	if (isset($document['proof_of_work'])) {
+		$document['proofOfWork'] = $document['proof_of_work'];
+		unset($document['proof_of_work']);
+	}
 	
-	// Expected amount of work is:
-	//     Client: $nSolutions * pow(16, $leadingZeros)
-	//     Server: $nSolutions
-	$leadingZeros = 2;
-	$nSolutions   = 200;
-	
-	$powSalt     = $getHash('POW', $get_id, $powSalt);
-	$proofOfWork = array(
-		'hash'          => 'SHA-256',
-		'formula'       => 'H(H(%x || %salt) || %x)',
-		'salt'          => $powSalt,
-		'leading_zeros' => $leadingZeros,
-		'n_solutions'   => $nSolutions
+	$response = array(
+		'getId' => $getId,
+		'self'  => "$documentUri/$getId",
+		'found' => true,
+		'proofOfWork' => $document['proofOfWork']
 	);
 	
-	$exists = is_dir($folder) && file_exists($file);
-	
-	if ($exists) {
-		if ($_SERVER['REQUEST_METHOD'] == 'GET') {
-			$contents = json_decode(file_get_contents($file), true);
-			$response = array(
-				'get_id' => $get_id,
-				'found'  => true,
-				'proof_of_work' => $contents['proof_of_work']
-			);
-			
-			if (isset($contents['contents'])) {
-				$response['contents'] = $contents['contents'];
-			}
-			
-			$json($response);
-		}
-		
-		if ($_SERVER['REQUEST_METHOD'] == 'DELETE') {
-			if (!isset($_DELETE['put_id'])) {
-				$json(array(
-					'error' => 'No put_id in DELETE!'
-				));
-			}
-			
-			$contents = json_decode(file_get_contents($file), true);
-			
-			if (
-				isset($contents['put_id']) &&
-				$contents['put_id'] != $_DELETE['put_id']
-			) {
-				$json(array(
-					'get_id' => $get_id,
-					'error'  => 'put_ids do not match!'
-				));
-			}
-			
-			unlink($file);
-			if (!(new \FilesystemIterator($folder))->valid()) {
-				rmdir($folder);
-			}
-			
-			$json(array(
-				'get_id'  => $get_id,
-				'deleted' => true
-			));
-		}
+	if (isset($document['contents'])) {
+		$response['contents'] = $document['contents'];
 	}
+	
+	return $response;
+};
+
+$deleteFile = function ($getId, $file) use ($_DELETE) {
+	if (!isset($_DELETE['putId'])) {
+		return array(
+			'error' => 'No putId in DELETE!'
+		);
+	}
+	
+	$document = json_decode(file_get_contents($file), true);
 	
 	if (
-		!isset($_PUT['proof_of_work']) &&
-		!isset($_PUT['proof_of_work']['response'])
+		isset($document['putId']) &&
+		$document['putId'] != $_DELETE['putId']
 	) {
-		// Send the challenge
-		$json(array(
-			'get_id'        => $get_id,
-			'proof_of_work' => $proofOfWork
-		));
+		return array(
+			'getId' => $getId,
+			'error' => 'putIds do not match!'
+		);
 	}
 	
-	if (!isset($_PUT['put_id'])) {
-		$json(array(
-			'success' => false,
-			'error'   => 'put_id missing!'
-		));
+	unlink($file);
+	
+	$folder = dirname($file);
+	if (!(new \FilesystemIterator($folder))->valid()) {
+		// Empty the delete folder
+		rmdir($folder);
 	}
 	
-	if ($exists) {
-		$contents = json_decode(file_get_contents($file), true);
-		
-		if (
-			isset($contents['put_id']) &&
-			$contents['put_id'] != $_PUT['put_id']
-		) {
-			$json(array(
-				'get_id' => $get_id,
-				'error'  => 'put_ids do not match!'
-			));
-		}
-	}
-	
-	// Validate the proof-of-work.
+	return array(
+		'getId'   => $getId,
+		'deleted' => true
+	);
+};
+
+$validatePow = function ($response, $clientPowSalt) use (
+	$nSolutions, $leadingZeros, $hash, $json
+) {
 	//TODO: this should be cached to APC or something...
-	$response = $_PUT['proof_of_work']['response'];
 	if (sizeof($response) != $nSolutions) {
 		$json(array(
 			'success' => false,
@@ -140,33 +120,118 @@ if (preg_match('_^/api/([^/]+)_', $_SERVER['DOCUMENT_URI'], $route)) {
 	}
 	
 	foreach ($response as $r) {
-		$h = $hash($hash($r . $powSalt) . $r);
+		$h = $hash($hash($r . $clientPowSalt) . $r);
+		
 		if (strlen($h) - strlen(ltrim($h, '0')) < $leadingZeros) {
-			$json($result);
 			$json(array(
 				'success' => false,
 				'error'   => sprintf("Invalid hash from '%s': %s!", $r, $h)
 			));
 		}
 	}
+};
+
+$storeDocument = function (
+	$getId, $putId, $file, $proofOfWork, $powResponse
+) use ($documentUri, $_PUT) {
+	$proofOfWork['response'] = $powResponse;
 	
-	$result['success'] = true;
+	$document = array(
+		'getId'       => $getId,
+		'putId'       => $putId,
+		'proofOfWork' => $proofOfWork
+	);
 	
+	if (isset($_PUT['contents'])) {
+		$document['contents'] = $_PUT['contents'];
+	}
+	
+	$folder = dirname($file);
 	if (!is_dir($folder)) {
 		mkdir($folder);
 	}
 	
-	$proofOfWork['response'] = $response;
-	$contents = array(
-		'get_id'        => $get_id,
-		'put_id'        => $_PUT['put_id'],
-		'proof_of_work' => $proofOfWork
+	file_put_contents($file, json_encode($document));
+	return "$documentUri/$getId";
+};
+
+
+/*************************
+	Main "controller"
+*************************/
+if (preg_match("_^$documentUri/([^/]+)_", $_SERVER['DOCUMENT_URI'], $route)) {
+	$getId  = $route[1];
+	$file   = substr($getHash('filename', $getId, $fileSalt), 32);
+	$folder = str_replace("\\", '/', __DIR__) . '/data/' . substr($file, -3);
+	$file   = $folder . '/' . substr($file, 0, -3) . '.json';
+	
+	//TODO: Make sure $folder is writeable!!!
+	
+	$clientPowSalt = $getHash('POW', $getId, $serverPowSalt);
+	$proofOfWork = array(
+		'hash'          => 'SHA-256',
+		'formula'       => 'H(H(%x || %salt) || %x)',
+		'salt'          => $clientPowSalt,
+		'leadingZeros'  => $leadingZeros,
+		'nSolutions'    => $nSolutions
 	);
 	
-	if (isset($_PUT['contents'])) {
-		$contents['contents'] = $_PUT['contents'];
+	$fileExists = is_dir($folder) && file_exists($file);
+	
+	if ($fileExists) {
+		if ($isHttpMethod('GET')) {
+			$json($getFile($getId, $file));
+		}
+		
+		if ($isHttpMethod('DELETE')) {
+			$json($deleteFile($getId, $file));
+		}
 	}
 	
-	file_put_contents($file, json_encode($contents));
-	$json($result);
+	if (!isset($_PUT['proofOfWork']) || !isset($_PUT['proofOfWork']['response'])) {
+		// To modify the file POW has to be included, send the challenge
+		$json(array(
+			'getId'        => $getId,
+			'proofOfWork' => $proofOfWork
+		));
+	}
+	
+	if (!isset($_PUT['putId'])) {
+		$json(array(
+			'success' => false,
+			'error'   => 'putId missing!'
+		));
+	}
+	
+	$putId = $_PUT['putId'];
+	
+	if ($fileExists) {
+		$document = json_decode(file_get_contents($file), true);
+		
+		if (isset($document['putId']) && $document['putId'] != $putId) {
+			$json(array(
+				'success' => false,
+				'error'   => 'putIds do not match!'
+			));
+		}
+	}
+	
+	$powResponse = $_PUT['proofOfWork']['response'];
+	$validatePow($powResponse, $clientPowSalt);
+	$uri = $storeDocument($getId, $putId, $file, $proofOfWork, $powResponse);
+	
+	$json(array(
+		'success' => true,
+		'self'    => $uri
+	));
 }
+
+// Catch-all option
+$json(array(
+	'links' => array(
+		'document' => array(
+			'self'        => '/api/documents/{id}',
+			'description' => 'Store and retrieve a document'
+		)
+	)
+));

@@ -55,9 +55,7 @@
 <div class="container">
     <div class="sixteen columns">
         <h1 style="margin-top: 20px; margin-bottom: 0px; text-align: center">
-            <a href="index.html" style="color: black; text-decoration: none">
-				NoKnowledgeNotes
-			</a>
+            NoKnowledgeNotes
         </h1>
 		<h3 style="text-align: center">
 			Own your data, share at will<sup style="font-size: 50%">[alpha]</sup>
@@ -205,7 +203,10 @@
 		username:       '',
 		password:       '',
 		isUserValid:    false,
-		docExists:      false
+		docExists:      false,
+		
+		// Queried from /api path, trying to be "true REST"
+		apiDescription: null
 	};
 	
 	var updateState = function() {
@@ -241,10 +242,10 @@
 			$('#text_input' ).val('');
 			$('#text_output').val('');
 			
-			state.proof_of_work = null;
+			state.proofOfWork = null;
 			state.revision      = '';
 			state.hmac          = '';
-			state.hmacs         = {};
+			state.hmacs         = [];
 			
 			if ('hmacs' in state) {
 				delete state.hmacs;
@@ -252,19 +253,22 @@
 		}
 		
 		state.docExists = !!(
-			state.proof_of_work &&
-			'response' in state.proof_of_work
+			state.proofOfWork &&
+			'response' in state.proofOfWork
 		);
 		
 		state.username = username;
 		state.password = password;
 		
-		$('#btn_load').prop('disabled', !state.isUserValid);
+		$('#btn_load').prop('disabled', !state.isUserValid || !state.apiDescription);
 		
-		if (!state.isUserValid) {
+		if (!state.apiDescription) {
+			$('#btn_load').text('Waiting for configurations');
+		}
+		else if (!state.isUserValid) {
 			$('#btn_load').text('Insert username & password');
 		}
-		else if (!state.proof_of_work) {
+		else if (!state.proofOfWork) {
 			$('#btn_load').text('Load document');
 		}
 		else if (state.docExists) {
@@ -281,6 +285,10 @@
 		if ($('#text_input').prop('readonly') != textInputReadonly) {
 			$('#text_input').prop('readonly', textInputReadonly);
 			$('#text_output').val('');
+			
+			if (!textInputReadonly) {
+				$('#text_input').focus();
+			}
 		}
 		
 		$('#btn_revert').prop('disabled', !state.docExists || !diffFromRevision);
@@ -291,11 +299,6 @@
 		var emptyDoc = $('#text_input').val().length == 0;
 		$('#btn_delete').prop('disabled', !state.docExists);
 		$('.input'     ).prop('readonly', !emptyDoc);
-	};
-	
-	var countLeadingZeros = function(str) {
-		match = str.match('^0+');
-		return match ? match[0].length : 0;
 	};
 	
 	var loadContents = function(contents) {
@@ -320,7 +323,8 @@
 			).toString(CryptoJS.enc.Utf8)
 		);
 		
-		state.hmacs = 'hmacs' in result ? result.hmacs : {};
+		state.hmacs     = 'hmacs' in result ? result.hmacs : [];
+		state.lastSaved = 'date' in result ? result.date : null;
 		
 		if (result.content_type == 'LZString.compressToUTF16') {
 			state.revision = LZString.decompressFromUTF16(result.payload);
@@ -340,9 +344,10 @@
 	};
 	
 	var isCreating     = false;
-	var createDocument = function(H, resourceUrl,
-			response, proof_of_work, i) {
-		var nSolutions = proof_of_work.n_solutions;
+	var createDocument = function(
+		H, resourceUrl, response, proofOfWork, i
+	) {
+		var nSolutions = proofOfWork.nSolutions;
 		
 		if (response.length < nSolutions) {
 			if (!i) {
@@ -351,10 +356,11 @@
 			}
 			
 			var validator = new RegExp(
-				'^' + (new Array(proof_of_work.leading_zeros+1)).join('0')
+				'^' + (new Array(proofOfWork.leadingZeros+1)).join('0')
 			);
 			
-			for (var iStart = i; i < iStart + 1000 &&
+			// Longer iterations would have less overhead but the UI would be less responsive.
+			for (var iStart = i; i < iStart + 500 &&
 					response.length < nSolutions; ++i) {
 				var iString = i.toString();
 				var h = H(iString);
@@ -370,7 +376,7 @@
 			// An asynchronous recursive call, to enable load button's text
 			// to change in the UI. Maybe there is a better way?
 			setTimeout(function() {
-				createDocument(H, resourceUrl, response, proof_of_work, i);
+				createDocument(H, resourceUrl, response, proofOfWork, i);
 			}, 1);
 		}
 		else {
@@ -380,8 +386,8 @@
 				url: resourceUrl,
 				contentType: 'application/json',
 				data: JSON.stringify({
-					'proof_of_work': {'response': response},
-					'put_id': $('#id_put').val()
+					'proofOfWork': {'response': response},
+					'putId': $('#id_put').val()
 				}),
 				success: function (data) {
 					if (!data.success) {
@@ -392,8 +398,8 @@
 						return;
 					}
 					
-					state.proof_of_work.response = response;
-					state.hmacs                  = {};
+					state.proofOfWork.response = response;
+					state.hmacs = [];
 					updateState();
 				}
 			});
@@ -405,26 +411,26 @@
 			return;
 		}
 		
-		var resourceUrl = '/api/' + $('#id_get').val();
+		var resourceUrl = state.apiDescription.links.document.getUri();
 		
-		if (!state.proof_of_work) {
-			// We don't have the proof_of_work in our state,
+		if (!state.proofOfWork) {
+			// We don't have the proofOfWork in our state,
 			// which means we are loading or creating a document
 			
 			$.get(resourceUrl, function (data) {
-				if ('proof_of_work' in data) {
-					// Aha, we've got proof_of_work in the response,
+				if ('proofOfWork' in data) {
+					// Aha, we've got proofOfWork in the response,
 					// indicating that the document exists already!
 					
-					state.proof_of_work = data.proof_of_work;
+					state.proofOfWork = data.proofOfWork;
 					
 					if ('contents' in data) {
 						// We've got previously stored contents, let's load them
 						
 						if (loadContents(data.contents)) {
 							// Error with HMAC or an other problem!
-							if ('response' in state.proof_of_work) {
-								delete state.proof_of_work.response;
+							if ('response' in state.proofOfWork) {
+								delete state.proofOfWork.response;
 							}
 						}
 					}
@@ -438,27 +444,27 @@
 			return;
 		}
 		
-		// proof_of_work is in our state, this click means we want to commit
+		// proofOfWork is in our state, this click means we want to commit
 		// into solving the challenge and thus creating the new document
-		if (state.proof_of_work.hash != 'SHA-256') {
-			console.error({error: 'Unknown hash!', hash: state.proof_of_work.hash});
+		if (state.proofOfWork.hash != 'SHA-256') {
+			console.error({error: 'Unknown hash!', hash: state.proofOfWork.hash});
 			return;
 		}
 		
 		var H = null;
-		if (state.proof_of_work.formula == 'H(H(%x || %salt) || %x)') {
-			H = function (x) { return hash(hash(x + state.proof_of_work.salt) + x); };
+		if (state.proofOfWork.formula == 'H(H(%x || %salt) || %x)') {
+			H = function (x) { return hash(hash(x + state.proofOfWork.salt) + x); };
 		}
 		else {
 			//TODO: Implement more alternative HMAC constructs
-			console.error({error: 'Unknown formula!', formula: state.proof_of_work.formula});
+			console.error({error: 'Unknown formula!', formula: state.proofOfWork.formula});
 			return;
 		}
 		
 		// createDocument is asynchronous, so we must avoid
 		// not to double-start it upon multiple clicks. 
 		if (!isCreating) {
-			createDocument(H, resourceUrl, [], state.proof_of_work);
+			createDocument(H, resourceUrl, [], state.proofOfWork);
 		}
 	};
 	
@@ -472,59 +478,79 @@
 		var inputComp = LZString.compressToUTF16(inputRaw);
 		//console.log({saved: 100*(1.0 - inputComp.length / inputRaw.length)});
 		
-		if ('hmac' in state) {
-			state.hmacs[state.hmac.substr(0, 32)] = [
-				Math.round(Date.now() / 1000.0),
-				Object.keys(state.hmacs).length + 1
-			];
+		if ('hmac' in state && state.hmac) {
+			state.hmacs.push({
+				hmac: state.hmac.substr(0, 32),
+				date: Math.round(Date.now() / 1000.0)
+			});
 		}
 		
+		var now  = Math.round(Date.now() / 1000.0);
 		var data = jsonFormatter.stringify(
 			CryptoJS.AES.encrypt(
 				JSON.stringify({
 					content_type: 'LZString.compressToUTF16',
 					payload:      inputComp,
-					hmacs:        state.hmacs
+					hmacs:        state.hmacs,
+					date:         now
 				}),
 				$('#key_enc').val()
 			)
 		);
 		
 		var contents = {
-			'data': data,
-			'hmac': getHash('hmac', $('#key_hmac').val(), JSON.stringify(data))
+			data: data,
+			hmac: getHash('hmac', $('#key_hmac').val(), JSON.stringify(data))
 		};
 		
 		state.hmac = contents.hmac;
 		
 		$.ajax({
 			type: 'PUT',
-			url: '/api/' + $('#id_get').val(),
+			url: state.apiDescription.links.document.getUri(),
 			contentType: 'application/json',
 			data: JSON.stringify({
-				'proof_of_work': state.proof_of_work,
-				'contents':      contents,
-				'put_id':        $('#id_put').val()
+				proofOfWork: state.proofOfWork,
+				contents:    contents,
+				putId:       $('#id_put').val()
 			}),
 			success: function (data) {
 				$('#text_output').val(JSON.stringify(contents));
-				state.revision = $('#text_input').val();
+				state.revision  = $('#text_input').val();
+				state.lastSaved = now;
 				updateState();
 			}
 		});
 	};
 	
+	$.get('/api', null, function (response) {
+		response.links.document.getUri = function (id) {
+			if (!id) {
+				id = $('#id_get').val();
+			}
+			
+			return response.links.document.self.replace(/\{id\}/, id);
+		};
+		
+		state.apiDescription = response;
+		updateState();
+	});
+	
 	$(function() {
 		// Set up event listeners once the document is ready
-		
-		$('#text_input').on('input', function() {
-			updateState();
-		});
-		
+		$('#text_input').on('input', updateState);
 		$('#btn_save'  ).on('click', saveClick);
 		$('.input'     ).on('input', updateState);
 		$('#btn_load'  ).on('click', inputClick);
 		$('#btn_close' ).on('click', closeClick);
+		
+		$('.input[type=password]').keypress(function(e) {
+			// Activate the main button on Enter press
+			if (e.which == 13) {
+				inputClick();
+			}
+		});
+		
 		$('#btn_delete').on('click', function() {
 			var emptyDoc = $('#text_input').val().length == 0;
 			if (!emptyDoc) {
@@ -534,10 +560,10 @@
 			
 			$.ajax({
 				type: 'DELETE',
-				url: '/api/' + $('#id_get').val(),
+				url: state.apiDescription.links.document.getUri(),
 				contentType: 'application/json',
 				data: JSON.stringify({
-					'put_id': $('#id_put').val()
+					'putId': $('#id_put').val()
 				}),
 				success: function (data) {
 					
