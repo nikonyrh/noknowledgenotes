@@ -523,13 +523,13 @@
 		});
 	};
 	
-	$.get('/api', null, function (response) {
+	$.get('/api/', null, function (response) {
 		response.links.document.getUri = function (id) {
 			if (!id) {
 				id = $('#id_get').val();
 			}
 			
-			return response.links.document.self.replace(/\{id\}/, id);
+			return response.links.document.template.replace(/\{.*?\}/, id);
 		};
 		
 		state.apiDescription = response;

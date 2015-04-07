@@ -230,7 +230,7 @@ if (preg_match("_^$documentUri/([^/]+)_", $_SERVER['DOCUMENT_URI'], $route)) {
 $json(array(
 	'links' => array(
 		'document' => array(
-			'self'        => '/api/documents/{id}',
+			'template'    => '/api/documents/{id}',
 			'description' => 'Store and retrieve a document'
 		)
 	)
