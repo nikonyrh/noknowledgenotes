@@ -112,14 +112,6 @@
 			<table border=0 cellspacing=0 cellpadding=2
 				style="width: 88%; margin-left: 5%; margin-right: 7%;">
 			<tr>
-				<td class="key">key<sub>enc</sub></sub></td>
-				<td>
-					<input type="text" id="key_enc"
-						style="width: 90%" placeholder="..." readonly/>
-				</td>
-			</tr>
-			
-			<tr>
 				<td class="key">id<sub>get</sub></td>
 				<td>
 					<input type="text" id="id_get"
@@ -136,6 +128,14 @@
 			</tr>
 			
 			<tr>
+				<td class="key">key<sub>enc</sub></sub></td>
+				<td>
+					<input type="text" id="key_enc"
+						style="width: 90%" placeholder="..." readonly/>
+				</td>
+			</tr>
+			
+			<tr>
 				<td class="key">key<sub>hmac</sub></td>
 				<td>
 					<input type="text" id="key_hmac"
@@ -143,6 +143,13 @@
 				</td>
 			</tr>
 			</table>
+			
+			<hr/>
+			
+			<p>
+				<span id=read_only_text style="display: none">Share (read-only)</span>
+				<a id=read_only_link target="_blank">Share (read-only)</a>
+			</p>
 			
 			<hr/>
 			
@@ -156,7 +163,7 @@
     <div class="two-thirds column">
 		<textarea id="text_input" style="width: 95%" rows=15
 			placeholder="Input..."></textarea>
-		<hr style="margin-bottom: 18px; width: 96.5%"/>
+		<hr id="text_area_hr" style="margin-bottom: 18px; width: 96.5%"/>
 		<textarea id="text_output" style="width: 95%" rows=10
 			placeholder="Output..." readonly></textarea>
     </div>
@@ -204,13 +211,57 @@
 		password:       '',
 		isUserValid:    false,
 		docExists:      false,
+		isReadOnly:     false,
 		
 		// Queried from /api path, trying to be "true REST"
 		apiDescription: null
 	};
 	
+	var params = {};
+	var href   = location.href.split('#!');
+	
+	if (href.length == 2) {
+		href[1].split('&').forEach(function (param) {
+			param = param.split('=');
+			if (param.length == 2) {
+				params[param[0]] = param[1];
+			}
+		});
+		
+		if (params.key) {
+			$('#key_enc').val(params.key);
+			$('#id_get').val(getHash('id_get', 'id_get', params.key));
+			state.isReadOnly = true;
+		}
+	}
+	
+	var refreshShareLink = function() {
+		var key = $('#key_enc').val();
+		
+		if (key.length > 0) {
+			$('#read_only_link').show().attr('href', '/#!key=' + key);
+			$('#read_only_text').hide();
+		}
+		else {
+			$('#read_only_link').hide().attr('href', null);
+			$('#read_only_text').show();
+		}
+	};
+	
 	var updateState = function() {
 		// This called upon various events to update input elements' states
+		if (state.isReadOnly) {
+			$('#btn_load').text('Read-only mode');
+			$('button').prop('disabled', true);
+			$('.input').prop('readonly', true);
+			$('#btn_close').prop('disabled', false);
+			$('.input').prop('placeholder', 'Read-only mode');
+			$('#text_output').hide();
+			$('#text_area_hr').hide();
+			
+			refreshShareLink();
+			return;
+		}
 		
 		var username = $('#username').val();
 		var password = $('#password').val();
@@ -299,15 +350,17 @@
 		var emptyDoc = $('#text_input').val().length == 0;
 		$('#btn_delete').prop('disabled', !state.docExists);
 		$('.input'     ).prop('readonly', !emptyDoc);
+		
+		refreshShareLink();
 	};
 	
 	var loadContents = function(contents) {
 		// Used to load, validate, decrypt and decompress stored documents
 		
-		var hmac = getHash('hmac', $('#key_hmac').val(),
-			JSON.stringify(contents.data));
+		var hmacKey = $('#key_hmac').val();
+		var hmac = getHash('hmac', hmacKey, JSON.stringify(contents.data));
 		
-		if (hmac != contents.hmac) {
+		if (hmacKey.length > 0 && hmac != contents.hmac) {
 			console.error({
 				'error':    'HMACs do not match!',
 				'expected': hmac,
@@ -407,7 +460,7 @@
 	};
 	
 	var inputClick = function() {
-		if (!state.isUserValid) {
+		if (!state.isUserValid && !state.isReadOnly) {
 			return;
 		}
 		
@@ -419,20 +472,25 @@
 			
 			$.get(resourceUrl, function (data) {
 				if ('proofOfWork' in data) {
-					// Aha, we've got proofOfWork in the response,
-					// indicating that the document exists already!
-					
-					state.proofOfWork = data.proofOfWork;
-					
-					if ('contents' in data) {
-						// We've got previously stored contents, let's load them
+					if ('response' in data.proofOfWork) {
+						// Aha, we've got proofOfWork in the response,
+						// indicating that the document exists already!
 						
-						if (loadContents(data.contents)) {
-							// Error with HMAC or an other problem!
-							if ('response' in state.proofOfWork) {
-								delete state.proofOfWork.response;
+						state.proofOfWork = data.proofOfWork;
+						
+						if ('contents' in data) {
+							// We've got previously stored contents, let's load them
+							
+							if (loadContents(data.contents)) {
+								// Error with HMAC or an other problem!
+								if ('response' in state.proofOfWork) {
+									delete state.proofOfWork.response;
+								}
 							}
 						}
+					}
+					else {
+						$('#text_input').val('Error: file not found!');
 					}
 					
 					updateState();
@@ -470,6 +528,7 @@
 	
 	var closeClick = function() {
 		$('.input').val('');
+		state.isReadOnly = false;
 		updateState();
 	};
 	
@@ -523,20 +582,24 @@
 		});
 	};
 	
-	$.get('/api/', null, function (response) {
-		response.links.document.getUri = function (id) {
-			if (!id) {
-				id = $('#id_get').val();
-			}
-			
-			return response.links.document.template.replace(/\{.*?\}/, id);
-		};
-		
-		state.apiDescription = response;
-		updateState();
-	});
-	
 	$(function() {
+		$.ajax({
+			type: 'GET',
+			url: '/api/',
+			async: false,
+			success: function (response) {
+				response.links.document.getUri = function (id) {
+					if (!id) {
+						id = $('#id_get').val();
+					}
+					
+					return response.links.document.template.replace(/\{.*?\}/, id);
+				};
+				
+				state.apiDescription = response;
+			}
+		});
+		
 		// Set up event listeners once the document is ready
 		$('#text_input').on('input', updateState);
 		$('#btn_save'  ).on('click', saveClick);
@@ -580,6 +643,11 @@
 		});
 		
 		updateState();
+		refreshShareLink();
+		
+		if (state.isReadOnly) {
+			inputClick();
+		}
 	});
 </script>
 
