@@ -472,24 +472,22 @@
 			
 			$.get(resourceUrl, function (data) {
 				if ('proofOfWork' in data) {
-					if ('response' in data.proofOfWork) {
-						// Aha, we've got proofOfWork in the response,
-						// indicating that the document exists already!
+					// Aha, we've got proofOfWork in the response,
+					// indicating that the document exists already!
+					
+					state.proofOfWork = data.proofOfWork;
+					
+					if ('contents' in data) {
+						// We've got previously stored contents, let's load them
 						
-						state.proofOfWork = data.proofOfWork;
-						
-						if ('contents' in data) {
-							// We've got previously stored contents, let's load them
-							
-							if (loadContents(data.contents)) {
-								// Error with HMAC or an other problem!
-								if ('response' in state.proofOfWork) {
-									delete state.proofOfWork.response;
-								}
+						if (loadContents(data.contents)) {
+							// Error with HMAC or an other problem!
+							if ('response' in state.proofOfWork) {
+								delete state.proofOfWork.response;
 							}
 						}
 					}
-					else {
+					else if (state.isReadOnly) {
 						$('#text_input').val('Error: file not found!');
 					}
 					

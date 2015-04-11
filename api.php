@@ -61,14 +61,14 @@ $getFile = function ($getId, $file) use ($documentUri) {
 	$response = array(
 		'getId' => $getId,
 		'self'  => "$documentUri/$getId",
-		'found' => true,
-		'proofOfWork' => $document['proofOfWork']
+		'found' => true
 	);
 	
 	if (isset($document['contents'])) {
 		$response['contents'] = $document['contents'];
 	}
 	
+	$response['proofOfWork'] = $document['proofOfWork'];
 	return $response;
 };
 
